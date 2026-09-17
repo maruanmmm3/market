@@ -15,12 +15,19 @@ const FORM_VACIO = {
   stock: "",
   categoria_id: "",
   imagen_url: "",
+  tipo_venta: "unidad",
 };
 
 function estadoDe(stock) {
   if (stock === 0) return "Agotado";
   if (stock <= 10) return "Stock bajo";
   return "En stock";
+}
+
+function formatoStock(producto) {
+  return producto.tipo_venta === "peso"
+    ? `${producto.stock.toFixed(3)} kg`
+    : producto.stock;
 }
 
 /** Miniatura del producto; si no hay imagen o no carga, muestra el ícono. */
@@ -88,7 +95,9 @@ function Productos() {
       console.error("Error al cargar productos:", error);
       setError("No se pudieron cargar los productos.");
     } else {
-      setProductos(data);
+      // stock es numeric en la base y Supabase lo devuelve como texto
+      // (ej. "10.500"); se normaliza a número apenas se lee.
+      setProductos(data.map((p) => ({ ...p, stock: Number(p.stock) })));
     }
     setLoading(false);
   }
@@ -186,6 +195,7 @@ function Productos() {
       stock: producto.stock,
       categoria_id: producto.categoria_id || "",
       imagen_url: producto.imagen_url || "",
+      tipo_venta: producto.tipo_venta || "unidad",
     });
     setErrorForm("");
     setModalForm(producto);
@@ -201,10 +211,15 @@ function Productos() {
     const precio = Number(form.precio);
     const stock = Number(form.stock);
 
+    const esPorPeso = form.tipo_venta === "peso";
+
     if (!nombre) return setErrorForm("El nombre es obligatorio.");
     if (!(precio >= 0)) return setErrorForm("El precio no es válido.");
-    if (!Number.isInteger(stock) || stock < 0)
+    if (esPorPeso) {
+      if (!(stock >= 0)) return setErrorForm("El stock inicial no es válido.");
+    } else if (!Number.isInteger(stock) || stock < 0) {
       return setErrorForm("El stock inicial no es válido.");
+    }
 
     setGuardandoForm(true);
     setErrorForm("");
@@ -219,7 +234,9 @@ function Productos() {
     const editando = modalForm && modalForm !== "crear";
     const query = editando
       ? supabase.from("store_productos").update(payload).eq("id", modalForm.id)
-      : supabase.from("store_productos").insert({ ...payload, stock });
+      : supabase
+          .from("store_productos")
+          .insert({ ...payload, stock, tipo_venta: form.tipo_venta });
 
     const { error } = await query;
     setGuardandoForm(false);
@@ -374,7 +391,9 @@ function Productos() {
                     <td className="px-5 py-4 text-slate-600">
                       S/ {Number(p.precio).toFixed(2)}
                     </td>
-                    <td className="px-5 py-4 text-slate-600">{p.stock}</td>
+                    <td className="px-5 py-4 text-slate-600">
+                      {formatoStock(p)}
+                    </td>
                     <td className="px-5 py-4">
                       <StatusBadge status={estadoDe(p.stock)} />
                     </td>
@@ -443,7 +462,7 @@ function Productos() {
                   <span className="text-slate-500">
                     Stock:{" "}
                     <span className="font-medium text-slate-700">
-                      {p.stock}
+                      {formatoStock(p)}
                     </span>
                   </span>
                 </div>
@@ -487,7 +506,7 @@ function Productos() {
             </h3>
             <p className="mb-4 text-sm text-slate-500">
               {productoSeleccionado.nombre} — Stock actual:{" "}
-              <strong>{productoSeleccionado.stock}</strong>
+              <strong>{formatoStock(productoSeleccionado)}</strong>
             </p>
 
             <form onSubmit={handleGuardarMovimiento} className="space-y-3">
@@ -518,9 +537,14 @@ function Productos() {
 
               <input
                 type="number"
-                min="1"
+                step={productoSeleccionado.tipo_venta === "peso" ? "0.001" : "1"}
+                min={productoSeleccionado.tipo_venta === "peso" ? "0.001" : "1"}
                 required
-                placeholder="Cantidad"
+                placeholder={
+                  productoSeleccionado.tipo_venta === "peso"
+                    ? "Cantidad (kg)"
+                    : "Cantidad"
+                }
                 value={cantidad}
                 onChange={(e) => setCantidad(e.target.value)}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -588,20 +612,61 @@ function Productos() {
                 ))}
               </select>
 
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-slate-500">
+                  Manejo de inventario
+                </p>
+                <div className="flex gap-2">
+                  {[
+                    { value: "unidad", label: "Por unidad" },
+                    { value: "peso", label: "Por peso (kg)" },
+                  ].map((opcion) => (
+                    <button
+                      key={opcion.value}
+                      type="button"
+                      disabled={modalForm !== "crear"}
+                      onClick={() =>
+                        setForm({ ...form, tipo_venta: opcion.value })
+                      }
+                      className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
+                        form.tipo_venta === opcion.value
+                          ? "border-sky-500 bg-sky-50 text-sky-700"
+                          : "border-slate-200 text-slate-500"
+                      }`}
+                    >
+                      {opcion.label}
+                    </button>
+                  ))}
+                </div>
+                {modalForm !== "crear" && (
+                  <p className="mt-1 text-xs text-slate-400">
+                    El manejo de inventario no se puede cambiar después de
+                    crear el producto.
+                  </p>
+                )}
+              </div>
+
               <div className="flex gap-3">
                 <input
                   type="number"
                   step="0.01"
                   min="0"
-                  placeholder="Precio (S/)"
+                  placeholder={
+                    form.tipo_venta === "peso" ? "Precio por kg (S/)" : "Precio (S/)"
+                  }
                   value={form.precio}
                   onChange={(e) => setForm({ ...form, precio: e.target.value })}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
                 <input
                   type="number"
+                  step={form.tipo_venta === "peso" ? "0.001" : "1"}
                   min="0"
-                  placeholder="Stock inicial"
+                  placeholder={
+                    form.tipo_venta === "peso"
+                      ? "Stock inicial (kg)"
+                      : "Stock inicial"
+                  }
                   value={form.stock}
                   disabled={modalForm !== "crear"}
                   title={

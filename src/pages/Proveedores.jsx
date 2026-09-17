@@ -76,9 +76,10 @@ function Proveedores() {
   async function fetchProductos() {
     const { data, error } = await supabase
       .from("store_productos")
-      .select("id, nombre, stock")
+      .select("id, nombre, stock, tipo_venta")
       .order("nombre", { ascending: true });
-    if (!error) setProductos(data);
+    // stock es numeric en la base y llega como texto (ej. "10.500").
+    if (!error) setProductos(data.map((p) => ({ ...p, stock: Number(p.stock) })));
   }
 
   async function fetchCompras() {
@@ -162,7 +163,13 @@ function Proveedores() {
       if (prev.find((l) => l.producto_id === producto.id)) return prev;
       return [
         ...prev,
-        { producto_id: producto.id, nombre: producto.nombre, cantidad: 1, costo_unitario: "" },
+        {
+          producto_id: producto.id,
+          nombre: producto.nombre,
+          tipo_venta: producto.tipo_venta,
+          cantidad: 1,
+          costo_unitario: "",
+        },
       ];
     });
     setBusqueda("");
@@ -402,35 +409,49 @@ function Proveedores() {
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1">
-                          <button
-                            onClick={() =>
-                              actualizarLinea(
-                                l.producto_id,
-                                "cantidad",
-                                Math.max(1, Number(l.cantidad || 1) - 1),
-                              )
-                            }
-                            className="rounded-md bg-slate-100 p-1 text-slate-500 hover:bg-slate-200"
-                          >
-                            <Minus size={13} />
-                          </button>
-                          <input
-                            type="number"
-                            min="1"
-                            value={l.cantidad}
-                            onChange={(e) =>
-                              actualizarLinea(l.producto_id, "cantidad", e.target.value)
-                            }
-                            className="w-14 rounded-md border border-slate-200 px-2 py-1 text-center text-sm"
-                          />
-                          <button
-                            onClick={() =>
-                              actualizarLinea(l.producto_id, "cantidad", Number(l.cantidad || 0) + 1)
-                            }
-                            className="rounded-md bg-slate-100 p-1 text-slate-500 hover:bg-slate-200"
-                          >
-                            <Plus size={13} />
-                          </button>
+                          {(() => {
+                            const esPorPeso = l.tipo_venta === "peso";
+                            const paso = esPorPeso ? 0.1 : 1;
+                            const minimo = esPorPeso ? 0.001 : 1;
+                            return (
+                              <>
+                                <button
+                                  onClick={() =>
+                                    actualizarLinea(
+                                      l.producto_id,
+                                      "cantidad",
+                                      Math.max(minimo, Number(l.cantidad || minimo) - paso),
+                                    )
+                                  }
+                                  className="rounded-md bg-slate-100 p-1 text-slate-500 hover:bg-slate-200"
+                                >
+                                  <Minus size={13} />
+                                </button>
+                                <input
+                                  type="number"
+                                  min={minimo}
+                                  step={esPorPeso ? "0.001" : "1"}
+                                  value={l.cantidad}
+                                  onChange={(e) =>
+                                    actualizarLinea(l.producto_id, "cantidad", e.target.value)
+                                  }
+                                  className="w-16 rounded-md border border-slate-200 px-2 py-1 text-center text-sm"
+                                />
+                                <button
+                                  onClick={() =>
+                                    actualizarLinea(
+                                      l.producto_id,
+                                      "cantidad",
+                                      Number(l.cantidad || 0) + paso,
+                                    )
+                                  }
+                                  className="rounded-md bg-slate-100 p-1 text-slate-500 hover:bg-slate-200"
+                                >
+                                  <Plus size={13} />
+                                </button>
+                              </>
+                            );
+                          })()}
                         </div>
                         <input
                           type="number"

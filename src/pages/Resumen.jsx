@@ -109,10 +109,12 @@ function Resumen() {
     );
 
     // ---- Top productos vendidos (últimos 30 días) ----
+    // cantidad es numeric en la base y llega como texto (ej. "2.000");
+    // hay que normalizarlo o "+=" concatenaría en vez de sumar.
     const porProducto = {};
     for (const it of itemsResp.data) {
       porProducto[it.nombre_producto] =
-        (porProducto[it.nombre_producto] || 0) + it.cantidad;
+        (porProducto[it.nombre_producto] || 0) + Number(it.cantidad);
     }
     setTopProductos(
       Object.entries(porProducto)
@@ -122,7 +124,12 @@ function Resumen() {
     );
 
     // ---- Inventario ----
-    const productos = productosResp.data || [];
+    // stock es numeric en la base y llega como texto; se normaliza para
+    // que las comparaciones (=== 0, <= 10, orden) funcionen bien.
+    const productos = (productosResp.data || []).map((p) => ({
+      ...p,
+      stock: Number(p.stock),
+    }));
     setTotalProductos(productos.length);
     setAgotados(productos.filter((p) => p.stock === 0).length);
     setProductosStockBajo(

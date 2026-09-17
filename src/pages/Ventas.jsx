@@ -3,6 +3,7 @@ import {
   Search,
   Plus,
   Minus,
+  Pencil,
   Trash2,
   ShoppingCart,
   CheckCircle2,
@@ -69,6 +70,8 @@ function Ventas() {
   const [guardando, setGuardando] = useState(false);
   const [errorVenta, setErrorVenta] = useState("");
   const [recibo, setRecibo] = useState(null); // venta recién confirmada, para mostrar
+  const [modalPeso, setModalPeso] = useState(null); // producto por peso a agregar/editar
+  const [kgIngresados, setKgIngresados] = useState("");
 
   // Historial
   const [ventas, setVentas] = useState([]);
@@ -86,9 +89,13 @@ function Ventas() {
   async function fetchProductos() {
     const { data, error } = await supabase
       .from("store_productos")
-      .select("id, nombre, precio, stock, imagen_url, categoria_id, store_categorias(nombre)")
+      .select(
+        "id, nombre, precio, stock, imagen_url, categoria_id, tipo_venta, store_categorias(nombre)",
+      )
       .order("nombre", { ascending: true });
-    if (!error) setProductos(data);
+    // stock es numeric en la base y Supabase lo devuelve como texto
+    // (ej. "10.500"); se normaliza a número apenas se lee.
+    if (!error) setProductos(data.map((p) => ({ ...p, stock: Number(p.stock) })));
   }
 
   async function fetchVentas() {
@@ -129,8 +136,20 @@ function Ventas() {
     return nombres.map((nombre) => ({ nombre, productos: porCategoria[nombre] }));
   }, [productos, busqueda]);
 
+  function abrirModalPeso(producto) {
+    const enCarrito = carrito.find((l) => l.producto_id === producto.id);
+    setKgIngresados(enCarrito ? String(enCarrito.cantidad) : "");
+    setModalPeso(producto);
+  }
+
   function agregarAlCarrito(producto) {
     if (producto.stock <= 0) return;
+
+    if (producto.tipo_venta === "peso") {
+      abrirModalPeso(producto);
+      return;
+    }
+
     setCarrito((prev) => {
       const existente = prev.find((l) => l.producto_id === producto.id);
       if (existente) {
@@ -149,9 +168,34 @@ function Ventas() {
           precio: Number(producto.precio),
           stock: producto.stock,
           cantidad: 1,
+          tipo_venta: "unidad",
         },
       ];
     });
+  }
+
+  function confirmarCantidadPeso() {
+    const kg = Number(kgIngresados);
+    if (!(kg > 0) || kg > modalPeso.stock) return;
+
+    setCarrito((prev) => {
+      const existente = prev.find((l) => l.producto_id === modalPeso.id);
+      const linea = {
+        producto_id: modalPeso.id,
+        nombre: modalPeso.nombre,
+        precio: Number(modalPeso.precio),
+        stock: modalPeso.stock,
+        cantidad: kg,
+        tipo_venta: "peso",
+      };
+      if (existente) {
+        return prev.map((l) => (l.producto_id === modalPeso.id ? linea : l));
+      }
+      return [...prev, linea];
+    });
+
+    setModalPeso(null);
+    setKgIngresados("");
   }
 
   function cambiarCantidad(producto_id, delta) {
@@ -313,6 +357,7 @@ function Ventas() {
                             <div className="flex items-center justify-between text-xs">
                               <span className="font-medium text-slate-600">
                                 S/ {Number(p.precio).toFixed(2)}
+                                {p.tipo_venta === "peso" ? " /kg" : ""}
                               </span>
                               <span
                                 className={
@@ -321,7 +366,13 @@ function Ventas() {
                                     : "text-slate-400"
                                 }
                               >
-                                {p.stock <= 0 ? "Agotado" : `Stock: ${p.stock}`}
+                                {p.stock <= 0
+                                  ? "Agotado"
+                                  : `Stock: ${
+                                      p.tipo_venta === "peso"
+                                        ? `${p.stock.toFixed(3)} kg`
+                                        : p.stock
+                                    }`}
                               </span>
                             </div>
                           </div>
@@ -358,27 +409,52 @@ function Ventas() {
                           {l.nombre}
                         </p>
                         <p className="text-xs text-slate-400">
-                          S/ {l.precio.toFixed(2)} c/u
+                          S/ {l.precio.toFixed(2)}
+                          {l.tipo_venta === "peso" ? " /kg" : " c/u"}
                         </p>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => cambiarCantidad(l.producto_id, -1)}
-                          className="rounded-md bg-slate-100 p-1 text-slate-500 hover:bg-slate-200"
-                        >
-                          <Minus size={13} />
-                        </button>
-                        <span className="w-6 text-center text-sm font-medium text-slate-700">
-                          {l.cantidad}
-                        </span>
-                        <button
-                          onClick={() => cambiarCantidad(l.producto_id, 1)}
-                          disabled={l.cantidad >= l.stock}
-                          className="rounded-md bg-slate-100 p-1 text-slate-500 hover:bg-slate-200 disabled:opacity-40"
-                        >
-                          <Plus size={13} />
-                        </button>
-                      </div>
+                      {l.tipo_venta === "peso" ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium text-slate-700">
+                            {l.cantidad.toFixed(3)} kg
+                          </span>
+                          <button
+                            onClick={() =>
+                              abrirModalPeso(
+                                productos.find((p) => p.id === l.producto_id) || {
+                                  id: l.producto_id,
+                                  nombre: l.nombre,
+                                  precio: l.precio,
+                                  stock: l.stock,
+                                  tipo_venta: "peso",
+                                },
+                              )
+                            }
+                            className="rounded-md bg-slate-100 p-1 text-slate-500 hover:bg-slate-200"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => cambiarCantidad(l.producto_id, -1)}
+                            className="rounded-md bg-slate-100 p-1 text-slate-500 hover:bg-slate-200"
+                          >
+                            <Minus size={13} />
+                          </button>
+                          <span className="w-6 text-center text-sm font-medium text-slate-700">
+                            {l.cantidad}
+                          </span>
+                          <button
+                            onClick={() => cambiarCantidad(l.producto_id, 1)}
+                            disabled={l.cantidad >= l.stock}
+                            className="rounded-md bg-slate-100 p-1 text-slate-500 hover:bg-slate-200 disabled:opacity-40"
+                          >
+                            <Plus size={13} />
+                          </button>
+                        </div>
+                      )}
                       <span className="w-16 text-right text-sm font-medium text-slate-700">
                         S/ {(l.precio * l.cantidad).toFixed(2)}
                       </span>
@@ -538,7 +614,9 @@ function Ventas() {
               {recibo.items.map((l) => (
                 <div key={l.producto_id} className="flex justify-between">
                   <span className="text-slate-600">
-                    {l.cantidad} × {l.nombre}
+                    {l.tipo_venta === "peso"
+                      ? `${l.cantidad.toFixed(3)} kg de ${l.nombre}`
+                      : `${l.cantidad} × ${l.nombre}`}
                   </span>
                   <span className="text-slate-700">
                     S/ {(l.precio * l.cantidad).toFixed(2)}
@@ -556,6 +634,98 @@ function Ventas() {
             >
               Cerrar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Cantidad exacta en kg para un producto por peso */}
+      {modalPeso && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg sm:p-7">
+            <h3 className="mb-1 text-lg font-semibold text-slate-800 sm:text-xl">
+              ¿Cuántos kg de {modalPeso.nombre}?
+            </h3>
+            <p className="mb-4 text-sm text-slate-500 sm:text-base">
+              S/ {Number(modalPeso.precio).toFixed(2)} por kg — Stock
+              disponible: {Number(modalPeso.stock).toFixed(3)} kg
+            </p>
+
+            <input
+              type="number"
+              step="0.001"
+              min="0.001"
+              max={modalPeso.stock}
+              autoFocus
+              placeholder="Cantidad (kg)"
+              value={kgIngresados}
+              onChange={(e) => setKgIngresados(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 px-4 py-3 text-xl font-medium sm:text-2xl"
+            />
+
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {[
+                { label: "+ ½ kg", valor: 0.5 },
+                { label: "+ ¼ kg", valor: 0.25 },
+                { label: "+ ⅛ kg", valor: 0.125 },
+              ].map((opcion) => (
+                <button
+                  key={opcion.label}
+                  type="button"
+                  onClick={() =>
+                    setKgIngresados((prev) =>
+                      Math.min(
+                        modalPeso.stock,
+                        (Number(prev) || 0) + opcion.valor,
+                      ).toFixed(3),
+                    )
+                  }
+                  className="rounded-lg border border-slate-200 py-3.5 text-base font-semibold text-slate-700 active:bg-teal-100 sm:hover:border-teal-300 sm:hover:bg-teal-50"
+                >
+                  {opcion.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setKgIngresados("")}
+              className="mt-2 w-full rounded-lg border border-slate-200 py-2.5 text-sm font-medium text-slate-400 active:bg-slate-100 sm:hover:bg-slate-50"
+            >
+              Limpiar
+            </button>
+
+            <div className="mt-4 flex items-center justify-between text-base sm:text-lg">
+              <span className="text-slate-500">Total</span>
+              <span className="font-semibold text-slate-800">
+                S/{" "}
+                {(
+                  Number(modalPeso.precio) * (Number(kgIngresados) || 0)
+                ).toFixed(2)}
+              </span>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setModalPeso(null);
+                  setKgIngresados("");
+                }}
+                className="rounded-lg px-4 py-3 text-base text-slate-500 hover:bg-slate-100"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarCantidadPeso}
+                disabled={
+                  !(Number(kgIngresados) > 0) ||
+                  Number(kgIngresados) > modalPeso.stock
+                }
+                className="rounded-lg bg-teal-600 px-5 py-3 text-base font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+              >
+                Agregar a la venta
+              </button>
+            </div>
           </div>
         </div>
       )}
