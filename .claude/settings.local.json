@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx --yes supabase db query \"select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name like 'store_%' order by table_name, ordinal_position;\" --linked --project-ref evplimhbpveiphqwlggt)"
+    ]
+  }
+}
