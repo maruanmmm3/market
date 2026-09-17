@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Mail } from "lucide-react";
 import { supabase } from "../supabaseClient";
 
 function Login() {
@@ -14,14 +15,14 @@ function Login() {
   const [codigoInvitacion, setCodigoInvitacion] = useState("");
 
   const [error, setError] = useState("");
-  const [mensaje, setMensaje] = useState("");
   const [loading, setLoading] = useState(false);
+  const [avisoConfirmacion, setAvisoConfirmacion] = useState(false);
+  const [correoRegistrado, setCorreoRegistrado] = useState("");
 
   const navigate = useNavigate();
 
   function limpiarMensajes() {
     setError("");
-    setMensaje("");
   }
 
   // ---------- LOGIN ----------
@@ -122,10 +123,13 @@ function Login() {
       return;
     }
 
-    setMensaje(
-      "Cuenta creada. Revisa tu correo para confirmar antes de iniciar sesión.",
-    );
-    setModo("login");
+    setCorreoRegistrado(email);
+    setAvisoConfirmacion(true);
+  }
+
+  function cerrarAvisoConfirmacion() {
+    setAvisoConfirmacion(false);
+    cambiarModo("login");
   }
 
   function cambiarModo(nuevoModo) {
@@ -309,12 +313,6 @@ function Login() {
             </div>
           )}
 
-          {mensaje && (
-            <div className="bg-green-100 border border-green-300 text-green-700 px-4 py-2 rounded-lg">
-              {mensaje}
-            </div>
-          )}
-
           <button
             type="submit"
             disabled={loading}
@@ -328,6 +326,33 @@ function Login() {
           </button>
         </form>
       </div>
+
+      {avisoConfirmacion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-sky-50 text-sky-500">
+              <Mail size={22} />
+            </div>
+            <h3 className="mb-1.5 text-base font-semibold text-slate-800">
+              Cuenta creada
+            </h3>
+            <p className="mb-5 text-sm text-slate-500">
+              Te enviamos un correo de confirmación a{" "}
+              <strong className="text-slate-700">{correoRegistrado}</strong>.
+              Ábrelo y confirma tu cuenta antes de iniciar sesión.
+            </p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={cerrarAvisoConfirmacion}
+                className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600"
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
