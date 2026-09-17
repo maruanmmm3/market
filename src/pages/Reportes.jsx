@@ -1,5 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { Lock, CheckCircle2, CalendarCheck, AlertTriangle } from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  Cell,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+import {
+  Lock,
+  CheckCircle2,
+  CalendarCheck,
+  AlertTriangle,
+  ArrowLeft,
+  ChevronRight,
+} from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
@@ -12,6 +28,14 @@ const MESES = [
   "enero", "febrero", "marzo", "abril", "mayo", "junio",
   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
 ];
+
+const NOMBRE_METODO_PAGO = {
+  efectivo: "Efectivo",
+  yape: "Yape",
+  plin: "Plin",
+  tarjeta: "Tarjeta",
+  otro: "Otro",
+};
 
 function hoyISO() {
   const d = new Date();
@@ -34,6 +58,12 @@ function Reportes() {
   const [cierres, setCierres] = useState([]);
   const [cerrando, setCerrando] = useState(false);
   const [confirmandoCierre, setConfirmandoCierre] = useState(false);
+
+  // ---------- Detalle de un mes (click en "Cierre de mes") ----------
+  const [vista, setVista] = useState("lista"); // "lista" | "detalle"
+  const [mesSeleccionado, setMesSeleccionado] = useState(null); // "YYYY-MM"
+  const [detalleMes, setDetalleMes] = useState(null);
+  const [cargandoDetalle, setCargandoDetalle] = useState(false);
 
   const cierreDeHoy = useMemo(
     () => cierres.find((c) => c.fecha === hoyISO()),
@@ -100,7 +130,210 @@ function Reportes() {
     return Object.values(grupos).sort((a, b) => b.clave.localeCompare(a.clave));
   }, [cierres]);
 
+  // ---------- Detalle de mes ----------
+  function abrirDetalleMes(clave) {
+    setMesSeleccionado(clave);
+    setVista("detalle");
+  }
+
+  function volverALista() {
+    setVista("lista");
+    setMesSeleccionado(null);
+    setDetalleMes(null);
+  }
+
+  useEffect(() => {
+    if (vista === "detalle" && mesSeleccionado) cargarDetalleMes(mesSeleccionado);
+  }, [vista, mesSeleccionado]);
+
+  async function cargarDetalleMes(clave) {
+    setCargandoDetalle(true);
+    const [anio, mes] = clave.split("-").map(Number);
+    const inicioMes = new Date(anio, mes - 1, 1);
+    const finMes = new Date(anio, mes, 1);
+    const diasEnMes = new Date(anio, mes, 0).getDate();
+
+    const [ventasResp, comprasResp] = await Promise.all([
+      supabase
+        .from("store_ventas")
+        .select("total, metodo_pago, created_at")
+        .eq("estado", "completada")
+        .gte("created_at", inicioMes.toISOString())
+        .lt("created_at", finMes.toISOString()),
+      supabase
+        .from("store_compras")
+        .select("total, created_at")
+        .gte("created_at", inicioMes.toISOString())
+        .lt("created_at", finMes.toISOString()),
+    ]);
+
+    if (ventasResp.error || comprasResp.error) {
+      console.error(ventasResp.error || comprasResp.error);
+      setCargandoDetalle(false);
+      return;
+    }
+
+    const ventas = ventasResp.data;
+
+    const totalesPorDia = Array.from({ length: diasEnMes }, () => 0);
+    const totalesPorMetodo = {};
+    let totalMes = 0;
+
+    for (const v of ventas) {
+      const dia = new Date(v.created_at).getDate();
+      totalesPorDia[dia - 1] += Number(v.total);
+      totalesPorMetodo[v.metodo_pago] =
+        (totalesPorMetodo[v.metodo_pago] || 0) + Number(v.total);
+      totalMes += Number(v.total);
+    }
+
+    const ventasPorDia = totalesPorDia.map((total, i) => ({
+      dia: String(i + 1).padStart(2, "0"),
+      total: Number(total.toFixed(2)),
+    }));
+
+    const diaTop = ventasPorDia.reduce(
+      (top, actual) => (actual.total > top.total ? actual : top),
+      ventasPorDia[0],
+    );
+
+    const porMetodoPago = Object.entries(totalesPorMetodo)
+      .map(([metodo, total]) => ({
+        metodo,
+        nombre: NOMBRE_METODO_PAGO[metodo] || metodo,
+        total,
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    const totalComprado = comprasResp.data.reduce(
+      (acc, c) => acc + Number(c.total),
+      0,
+    );
+
+    setDetalleMes({ totalMes, ventasPorDia, diaTop, porMetodoPago, totalComprado });
+    setCargandoDetalle(false);
+  }
+
   if (cargando) return <div className="p-6 text-slate-400">Cargando reportes...</div>;
+
+  if (vista === "detalle" && mesSeleccionado) {
+    const [anio, mes] = mesSeleccionado.split("-");
+    const tituloMes = `${MESES[Number(mes) - 1]} ${anio}`;
+
+    return (
+      <div>
+        <button
+          onClick={volverALista}
+          className="mb-4 flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700"
+        >
+          <ArrowLeft size={16} /> Volver
+        </button>
+
+        <SectionHeader
+          title={`Detalle de ${tituloMes}`}
+          subtitle="Ventas por día, método de pago y compras a proveedores en el mes."
+        />
+
+        {cargandoDetalle || !detalleMes ? (
+          <div className="p-6 text-slate-400">Cargando detalle del mes...</div>
+        ) : (
+          <>
+            <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <StatCard
+                label="Total del mes"
+                value={`S/ ${detalleMes.totalMes.toFixed(2)}`}
+              />
+              <StatCard
+                label="Día que más vendió"
+                value={
+                  detalleMes.diaTop.total > 0
+                    ? `${detalleMes.diaTop.dia} de ${tituloMes}`
+                    : "—"
+                }
+                delta={
+                  detalleMes.diaTop.total > 0
+                    ? `S/ ${detalleMes.diaTop.total.toFixed(2)}`
+                    : undefined
+                }
+              />
+              <StatCard
+                label="Comprado a proveedores"
+                value={
+                  detalleMes.totalComprado > 0
+                    ? `S/ ${detalleMes.totalComprado.toFixed(2)}`
+                    : "Sin compras"
+                }
+              />
+            </div>
+
+            <div className="mb-6 rounded-xl border border-slate-100 bg-white p-5">
+              <p className="mb-4 text-sm font-semibold text-slate-800">
+                Ventas por día
+              </p>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={detalleMes.ventasPorDia} margin={{ left: -20, right: 10 }}>
+                    <XAxis
+                      dataKey="dia"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontSize: 11, fill: "#94a3b8" }}
+                      interval={2}
+                    />
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontSize: 11, fill: "#94a3b8" }}
+                    />
+                    <Tooltip
+                      formatter={(value) => [`S/ ${value}`, "Ventas"]}
+                      labelFormatter={(dia) => `Día ${dia}`}
+                      contentStyle={{
+                        borderRadius: 10,
+                        border: "1px solid #e2e8f0",
+                        fontSize: 12,
+                      }}
+                    />
+                    <Bar dataKey="total" radius={[4, 4, 0, 0]}>
+                      {detalleMes.ventasPorDia.map((d) => (
+                        <Cell
+                          key={d.dia}
+                          fill={d.dia === detalleMes.diaTop.dia ? "#0d9488" : "#99f6e4"}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-100 bg-white p-5">
+              <p className="mb-4 text-sm font-semibold text-slate-800">
+                Por método de pago
+              </p>
+              {detalleMes.porMetodoPago.length === 0 ? (
+                <EmptyState message="No hubo ventas registradas en este mes." />
+              ) : (
+                <div className="space-y-3">
+                  {detalleMes.porMetodoPago.map((m) => (
+                    <div
+                      key={m.metodo}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span className="text-slate-600">{m.nombre}</span>
+                      <span className="font-medium text-slate-700">
+                        S/ {m.total.toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -159,19 +392,27 @@ function Reportes() {
                   <th className="px-4 py-3 font-medium">Mes</th>
                   <th className="px-4 py-3 font-medium">Días cerrados</th>
                   <th className="px-4 py-3 font-medium">Total del mes</th>
+                  <th className="px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {cierresPorMes.map((m) => {
                   const [anio, mes] = m.clave.split("-");
                   return (
-                    <tr key={m.clave} className="hover:bg-slate-50/60">
+                    <tr
+                      key={m.clave}
+                      onClick={() => abrirDetalleMes(m.clave)}
+                      className="cursor-pointer hover:bg-slate-50/60"
+                    >
                       <td className="px-4 py-3 font-medium capitalize text-slate-700">
                         {MESES[Number(mes) - 1]} {anio}
                       </td>
                       <td className="px-4 py-3 text-slate-500">{m.dias}</td>
                       <td className="px-4 py-3 font-medium text-slate-700">
                         S/ {m.total.toFixed(2)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-300">
+                        <ChevronRight size={16} />
                       </td>
                     </tr>
                   );
