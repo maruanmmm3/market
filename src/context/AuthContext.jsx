@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
 
 const AuthContext = createContext(undefined);
@@ -15,11 +15,17 @@ export function AuthProvider({ children }) {
   const [usuario, setUsuario] = useState(null); // fila de store_usuarios
   const [perfilCargando, setPerfilCargando] = useState(true);
 
+  // Guarda el id del usuario cuyo perfil ya está cargado, para no
+  // volver a pedirlo cuando Supabase solo renueva el token (p. ej. al
+  // recuperar el foco de la ventana) y el usuario sigue siendo el mismo.
+  const usuarioIdRef = useRef(null);
+
   useEffect(() => {
     let activo = true;
 
     async function cargarPerfil(sesionActual) {
       if (!sesionActual) {
+        usuarioIdRef.current = null;
         if (activo) {
           setUsuario(null);
           setPerfilCargando(false);
@@ -27,6 +33,7 @@ export function AuthProvider({ children }) {
         return;
       }
 
+      usuarioIdRef.current = sesionActual.user.id;
       if (activo) setPerfilCargando(true);
 
       const { data, error } = await supabase
@@ -54,7 +61,12 @@ export function AuthProvider({ children }) {
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, sesionNueva) => {
         setSession(sesionNueva);
-        cargarPerfil(sesionNueva);
+        // Evita recargar el perfil (y el parpadeo de "Cargando..." que
+        // desmonta el panel) cuando el evento es solo una renovación de
+        // token del mismo usuario, como ocurre al volver a la pestaña.
+        if (sesionNueva?.user?.id !== usuarioIdRef.current) {
+          cargarPerfil(sesionNueva);
+        }
       },
     );
 
